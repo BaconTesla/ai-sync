@@ -124,9 +124,9 @@ macOS 开发版应用数据目录通常为 `~/Library/Application Support/ai-syn
 3. [PR #3：仅同步 Skills 与 MCP](https://github.com/BaconTesla/ai-sync/pull/3)。
 4. [PR #4：Skill 名称分组与文件树](https://github.com/BaconTesla/ai-sync/pull/4)。
 
-文件树先合入范围限制分支，再合入 GUI；完整 GUI 最后进入 `develop`。功能分支保留作开发历史，日常使用请以 `main` 为准。第一版说明见 [`docs/releases/v0.2.1.md`](docs/releases/v0.2.1.md)。
+文件树先合入范围限制分支，再合入 GUI；完整 GUI 最后进入 `develop`，通过[发布 PR #5](https://github.com/BaconTesla/ai-sync/pull/5)集成到 `main`。功能分支保留作开发历史，日常使用请以 `main` 为准。第一版说明见 [`docs/releases/v0.2.1.md`](docs/releases/v0.2.1.md)。
 
-仓库已配置 macOS CI 工作流。第一版合并前本地类型检查、32 项测试和 GUI 冒烟测试通过；GitHub 当时未返回 CI 检查记录，不将其视为远程 CI 通过。新 package 引入前必须先通过 Context7 查询最新文档，记录见 [`docs/context7.md`](docs/context7.md)。
+仓库已配置 macOS CI 工作流。本地类型检查、32 项测试和 GUI 冒烟测试通过；第一批功能 PR 检查时 GitHub 未返回 CI 记录，不将其视为远程 CI 通过。集成后 GitHub 已触发 macOS CI，发布 PR 必须等待其检查通过再合并。新 package 引入前必须先通过 Context7 查询最新文档，记录见 [`docs/context7.md`](docs/context7.md)。
 
 ## 后续计划
 
