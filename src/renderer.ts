@@ -1,3 +1,5 @@
+import { libraryEntries, selectablePaths, skillFileTree, type LibraryEntry, type SkillTreeNode } from './library.js';
+
 function el<T extends HTMLElement = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`Missing element ${id}`);
@@ -7,8 +9,10 @@ const input = (id: string): HTMLInputElement => el<HTMLInputElement>(id);
 let local: LocalState | undefined;
 let plan: SyncPlan | undefined;
 let filter = 'all';
+let focusEntry = '';
 let focusPath = '';
 let busy = false;
+// Selection stays file-based at the IPC boundary; the UI adds/removes all eligible files of a Skill together.
 const selected = new Set<string>();
 
 function message(text: string, error = false): void {
@@ -29,94 +33,163 @@ function mcpNames(content: string): string[] {
     const value = JSON.parse(content) as Record<string, unknown>;
     const servers = value.mcpServers ?? value.mcp ?? value.mcp_servers;
     if (servers && typeof servers === 'object' && !Array.isArray(servers)) return Object.keys(servers);
-  } catch { /* All supported MCP sources are projected to JSON; never parse or evaluate raw settings here. */ }
+  } catch { /* Only projected MCP definitions are displayed, never raw settings. */ }
   return [];
 }
-function skillTitle(content: string): string | undefined {
-  return /^#\s+(.+)$/m.exec(content)?.[1]?.trim().slice(0, 100);
+function inventoryRows(): PlanRow[] {
+  return (local?.inventory.files ?? []).map(f => ({ ...f, status: '相同', local: f.content, remote: '' }));
 }
-function visibleRows(): PlanRow[] {
-  const rows = plan?.rows ?? (local?.inventory.files ?? []).map(f => ({ ...f, status: '相同' as const, local: f.content, remote: '' }));
+function entries(): LibraryEntry[] { return libraryEntries(plan?.rows ?? inventoryRows(), Boolean(plan)); }
+function visibleEntries(): LibraryEntry[] {
   const query = input('search').value.trim().toLowerCase();
-  return rows.filter(r => (filter === 'all' || r.kind === filter) && `${r.path} ${r.agent} ${r.kind === 'MCP' ? mcpNames(plan ? r.remote : r.local).join(' ') : skillTitle(plan ? r.remote : r.local) ?? ''}`.toLowerCase().includes(query));
+  return entries().filter(entry => (filter === 'all' || entry.kind === filter) &&
+    `${entry.title} ${entry.path} ${entry.agent} ${entry.files.map(f => `${f.path} ${f.kind === 'MCP' ? mcpNames(plan ? f.remote : f.local).join(' ') : ''}`).join(' ')}`.toLowerCase().includes(query));
 }
+function selectedEntries(): LibraryEntry[] { return entries().filter(entry => entry.files.some(f => selected.has(f.path))); }
 function updateActions(): void {
   for (const id of ['refresh', 'share', 'rotate', 'preview', 'backups', 'local-view', 'select-new', 'confirm-apply']) el<HTMLButtonElement>(id).disabled = busy;
   el<HTMLButtonElement>('apply').disabled = busy || !plan || selected.size === 0;
-  el('apply').textContent = `拉取所选 (${selected.size})`;
+  el('apply').textContent = `拉取所选 (${selectedEntries().length})`;
   for (const check of document.querySelectorAll<HTMLInputElement>('#inventory input[type=checkbox]')) check.disabled = busy || check.dataset.unchanged === 'true';
 }
-function showRow(row: PlanRow): void {
+function showFile(row: PlanRow, entry: LibraryEntry): void {
   focusPath = row.path;
-  el('detail-name').textContent = `${row.kind === 'MCP' ? 'MCP 服务定义 · ' : ''}${row.path.split('/').pop() ?? row.path}`;
-  el('detail-meta').textContent = `${row.agent} · ${row.kind}${plan ? ` · ${row.status}` : ''}`;
-  el('local-content').textContent = row.local || (row.status === '新增' ? '本机尚无此文件。' : '（空文件）');
+  el('detail-name').textContent = entry.title;
+  const filename = entry.kind === 'Skill' ? row.path.slice(entry.path.length + 1) : 'MCP 服务定义';
+  el('detail-meta').textContent = `${filename}${plan ? ` · ${row.status}` : ''}`;
+  el('local-content').textContent = row.local || (row.status === '新增' ? '本机尚无此文件或 MCP 定义。' : '（空文件）');
   el('remote-content').textContent = row.remote || '（空文件）';
   el('remote-pane').hidden = !plan;
   document.querySelector('.diff')!.classList.toggle('comparing', Boolean(plan));
   const names = row.kind === 'MCP' ? mcpNames(plan ? row.remote : row.local) : [];
   el('service-info').hidden = names.length === 0;
   el('service-info').textContent = `MCP 服务声明：${names.join(' · ')}（未执行 / 未检查运行状态）`;
+  for (const file of document.querySelectorAll<HTMLButtonElement>('#skill-tree [data-file-path]')) {
+    const active = file.dataset.filePath === row.path;
+    file.classList.toggle('active', active);
+    file.setAttribute('aria-pressed', String(active));
+  }
+}
+function renderTree(entry: LibraryEntry): void {
+  el('skill-files').hidden = entry.kind !== 'Skill';
+  const tree = el('skill-tree');
+  tree.replaceChildren();
+  if (entry.kind !== 'Skill') return;
+  el('tree-summary').textContent = `${plan ? '对端' : '本机'} ${entry.files.length} 个可共享文件 · 点击查看内容`;
+  const build = (nodes: SkillTreeNode[]): HTMLUListElement => {
+    const list = document.createElement('ul');
+    list.className = 'skill-tree-list';
+    for (const node of nodes) {
+      const item = document.createElement('li');
+      if (node.children.length) {
+        const folder = document.createElement('details');
+        folder.open = true;
+        const label = document.createElement('summary');
+        label.textContent = node.name;
+        folder.append(label, build(node.children));
+        item.append(folder);
+      } else if (node.file) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'tree-file';
+        button.dataset.filePath = node.file.path;
+        button.textContent = `${node.name}${plan ? ` · ${node.file.status}` : ''}`;
+        button.onclick = () => showFile(node.file!, entry);
+        item.append(button);
+      }
+      list.append(item);
+    }
+    return list;
+  };
+  tree.append(build(skillFileTree(entry)));
+}
+function showEntry(entry: LibraryEntry): void {
+  const previousFile = focusEntry === entry.id ? focusPath : '';
+  focusEntry = entry.id;
+  renderTree(entry);
+  const row = entry.files.find(f => f.path === previousFile) ?? entry.files.find(f => f.path === entry.manifest) ?? entry.files[0];
+  if (row) showFile(row, entry);
+}
+function clearDetails(): void {
+  focusEntry = '';
+  focusPath = '';
+  el('detail-name').textContent = '选择一个 Skill 或 MCP';
+  el('detail-meta').textContent = '内容预览';
+  el('local-content').textContent = '点击左侧 Skill 查看文件树，再选择文件预览内容。';
+  el('remote-pane').hidden = true;
+  el('service-info').hidden = true;
+  el('skill-files').hidden = true;
+  el('skill-tree').replaceChildren();
+  document.querySelector('.diff')!.classList.remove('comparing');
 }
 function renderRows(): void {
   const list = el('inventory');
   list.replaceChildren();
-  const rows = visibleRows();
-  for (const row of rows) {
+  const visible = visibleEntries();
+  if (focusEntry && !visible.some(entry => entry.id === focusEntry)) clearDetails();
+  for (const entry of visible) {
     const item = document.createElement('div');
     item.className = 'file-row';
-    item.classList.toggle('focused', row.path === focusPath);
+    item.classList.toggle('focused', entry.id === focusEntry);
+    item.dataset.entryId = entry.id;
     item.tabIndex = 0;
     item.setAttribute('role', 'button');
-    item.setAttribute('aria-label', `${row.agent} ${row.path}${plan ? ` ${row.status}` : ''}`);
+    item.setAttribute('aria-label', `${entry.agent} ${entry.title}${plan ? ` ${entry.status}` : ''}`);
     if (plan) {
       const check = document.createElement('input');
       check.type = 'checkbox';
-      check.checked = selected.has(row.path);
-      check.dataset.unchanged = String(row.status === '相同');
-      check.disabled = row.status === '相同' || busy;
-      check.setAttribute('aria-label', `选择 ${row.path}`);
+      const paths = selectablePaths(entry);
+      check.checked = paths.length > 0 && paths.every(p => selected.has(p));
+      check.dataset.unchanged = String(entry.status === '相同');
+      check.disabled = entry.status === '相同' || busy;
+      check.setAttribute('aria-label', `选择${entry.kind === 'Skill' ? '整个 Skill' : ' MCP 服务组'} ${entry.title}`);
       check.onclick = e => e.stopPropagation();
-      check.onchange = () => { check.checked ? selected.add(row.path) : selected.delete(row.path); updateActions(); };
+      check.onchange = () => { for (const p of paths) check.checked ? selected.add(p) : selected.delete(p); updateActions(); };
       item.append(check);
     }
     const icon = document.createElement('span');
     icon.className = 'file-icon';
-    icon.textContent = row.kind === 'Skill' ? '✦' : '{ }';
+    icon.textContent = entry.kind === 'Skill' ? '✦' : '{ }';
     const info = document.createElement('div');
     info.className = 'file-info';
     const name = document.createElement('span');
     name.className = 'file-name';
-    name.textContent = row.kind === 'Skill' ? skillTitle(plan ? row.remote : row.local) ?? row.path.split('/').pop()! : `MCP · ${row.path.split('/').pop()!}`;
+    name.textContent = entry.title;
     const relative = document.createElement('div');
     relative.className = 'file-path';
-    relative.textContent = `~/${row.path}`;
+    relative.textContent = `~/${entry.path}`;
     const badges = document.createElement('div');
     badges.className = 'file-badges';
     const agent = document.createElement('span');
     agent.className = 'badge';
-    agent.textContent = row.agent;
+    agent.textContent = entry.agent;
     badges.append(agent);
+    if (entry.kind === 'Skill') {
+      const count = document.createElement('span');
+      count.className = 'badge';
+      count.textContent = `${entry.files.length} 个文件`;
+      badges.append(count);
+    }
     if (plan) {
       const status = document.createElement('span');
-      status.className = `badge ${row.status === '新增' ? 'new' : row.status === '不同' ? 'changed' : ''}`;
-      status.textContent = row.status === '不同' ? row.kind === 'MCP' ? '不同 · 合并服务' : '不同 · 将覆盖' : row.status;
+      status.className = `badge ${entry.status === '新增' ? 'new' : entry.status === '不同' ? 'changed' : ''}`;
+      status.textContent = entry.status === '不同' ? entry.kind === 'MCP' ? '不同 · 合并服务' : '存在文件差异' : entry.status;
       badges.append(status);
     }
     info.append(name, relative, badges);
     item.append(icon, info);
-    item.onclick = () => { showRow(row); renderRows(); };
-    item.onkeydown = e => { if (e.target === item && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showRow(row); renderRows(); } };
+    item.onclick = () => { showEntry(entry); renderRows(); };
+    item.onkeydown = e => { if (e.target === item && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showEntry(entry); renderRows(); } };
     list.append(item);
   }
-  if (!rows.length) {
+  if (!visible.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = input('search').value || filter !== 'all' ? '没有匹配的文件。' : plan ? '对端没有可同步文件。检查被排除的文件与支持路径。' : '还没有发现可共享的 Skills 或 MCP。\n没有 MCP 定义的设置文件不会出现在这里。';
+    empty.textContent = input('search').value || filter !== 'all' ? '没有匹配的 Skill 或 MCP。' : plan ? '对端没有可同步的 Skill 或 MCP。检查被排除的文件与支持路径。' : '还没有发现可共享的 Skills 或 MCP。\nSkill 目录中需要有 SKILL.md；没有 MCP 定义的设置文件不会出现在这里。';
     list.append(empty);
   }
   el('inventory-title').textContent = plan ? '同步预览 · 对端 → 本机' : '本机 Skills 与 MCP';
-  el('inventory-subtitle').textContent = plan ? 'Skills 按文件同步；MCP 只合并服务定义，本机其他设置和独有服务保留。预览有效 5 分钟。' : '只共享 Skills 和 MCP 服务定义，不共享模型、权限、历史等其他设置。';
+  el('inventory-subtitle').textContent = plan ? '按整个 Skill 勾选通过过滤的文件；MCP 只合并服务定义。预览有效 5 分钟。' : '一个 Skill 一项，点击查看文件树。只共享 Skills 与 MCP，不共享其他设置。';
   el('local-view').hidden = !plan;
   el('select-new').hidden = !plan;
   const skipped = plan?.skipped ?? local?.inventory.skipped ?? [];
@@ -125,32 +198,23 @@ function renderRows(): void {
   el('skipped').textContent = skipped.join('\n');
   updateActions();
 }
-function clearPreview(): void {
-  plan = undefined;
-  selected.clear();
-  focusPath = '';
-  el('detail-name').textContent = '选择一个文件';
-  el('detail-meta').textContent = '内容预览';
-  el('local-content').textContent = '在左侧选择 Skill 或 MCP，查看共享内容。';
-  el('remote-pane').hidden = true;
-  el('service-info').hidden = true;
-  document.querySelector('.diff')!.classList.remove('comparing');
-}
+function clearPreview(): void { plan = undefined; selected.clear(); clearDetails(); }
 async function refresh(): Promise<void> {
   local = await window.sync.state();
   el('device').firstChild!.textContent = local.device;
   input('bind').value = local.bind || local.addresses[0] || input('bind').value;
   input('listen-port').value = String(local.port);
   input('local-token').value = local.token;
-  el('file-count').textContent = String(local.inventory.files.length);
-  el('skill-count').textContent = String(local.inventory.files.filter(f => /(^|\/)SKILL\.md$/.test(f.path)).length);
+  const library = libraryEntries(inventoryRows());
+  el('file-count').textContent = String(library.length);
+  el('skill-count').textContent = String(library.filter(entry => entry.kind === 'Skill').length);
   el('mcp-count').textContent = String(local.inventory.files.filter(f => f.kind === 'MCP').reduce((sum, f) => sum + mcpNames(f.content).length, 0));
   el('share-status').textContent = local.sharing ? '共享中' : '已关闭';
   el('address-label').textContent = local.sharing ? `${local.bind}:${local.port}` : local.addresses.join(' · ') || '未检测到 Tailscale IPv4';
   el('share').textContent = local.sharing ? '停止共享' : '开启共享';
   renderRows();
 }
-el('refresh').onclick = () => void task(async () => { clearPreview(); await refresh(); message('本机配置已刷新。'); });
+el('refresh').onclick = () => void task(async () => { clearPreview(); await refresh(); message('本机 Skills 与 MCP 已刷新。'); });
 el('share').onclick = () => void task(async () => {
   try { await window.sync.share({ enabled: !local?.sharing, host: input('bind').value.trim(), port: Number(input('listen-port').value) }); }
   finally { await refresh(); }
@@ -164,11 +228,12 @@ el('preview').onclick = () => void task(async () => {
   message('正在连接对端并校验快照…');
   plan = await window.sync.preview({ host: input('peer-host').value.trim(), port: Number(input('peer-port').value), token: input('peer-token').value.trim() });
   renderRows();
-  if (plan.rows[0]) { showRow(plan.rows[0]); renderRows(); }
-  message(`预览就绪：${plan.rows.filter(r => r.status === '新增').length} 个新增，${plan.rows.filter(r => r.status === '不同').length} 个不同。勾选需要拉取的条目；MCP 仅合并服务定义，同名服务会替换，本机其他设置保持不变。`);
+  const first = visibleEntries()[0];
+  if (first) { showEntry(first); renderRows(); }
+  message('预览就绪：Skill 已按名称分组，点击查看文件树和每个文件的差异；勾选会包含该 Skill 所有需要更新的可共享文件。MCP 只合并服务定义。');
 });
 el('local-view').onclick = () => { clearPreview(); renderRows(); };
-el('select-new').onclick = () => { for (const row of visibleRows()) if (row.status === '新增') selected.add(row.path); renderRows(); };
+el('select-new').onclick = () => { for (const entry of visibleEntries()) if (entry.status === '新增') for (const p of selectablePaths(entry)) selected.add(p); renderRows(); };
 el('backups').onclick = () => void task(async () => { await window.sync.openBackups(); });
 input('search').oninput = renderRows;
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-filter]')) button.onclick = () => {
@@ -178,10 +243,10 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('[data-filter]
 };
 el('apply').onclick = () => {
   if (!plan || !selected.size) return;
-  const rows = plan.rows.filter(r => selected.has(r.path));
-  const mcpCount = rows.filter(r => r.kind === 'MCP').length;
-  const skillCount = rows.filter(r => r.kind === 'Skill').length;
-  el('confirm-text').textContent = `将拉取 ${skillCount} 个 Skill 文件、${mcpCount} 组 MCP 服务。Skill 文件会按对端内容写入；MCP 只添加或替换同名服务，保留本机独有服务及其他设置。写入前备份原文件。MCP 所在文件会重新排版，注释可能移除。`;
+  const chosen = selectedEntries();
+  const mcpCount = chosen.filter(entry => entry.kind === 'MCP').length;
+  const skillCount = chosen.filter(entry => entry.kind === 'Skill').length;
+  el('confirm-text').textContent = `将拉取 ${skillCount} 个 Skill、${mcpCount} 组 MCP 服务，共写入 ${selected.size} 个文件。Skill 中有变化的可共享文件一起更新（相同文件不重写，被安全过滤的文件不包含在内）。MCP 只添加或替换同名服务，保留本机独有服务及其他设置。写入前备份原文件。MCP 所在文件会重新排版，注释可能移除。`;
   el<HTMLDialogElement>('confirm-dialog').showModal();
 };
 el('cancel-apply').onclick = () => el<HTMLDialogElement>('confirm-dialog').close();
@@ -197,4 +262,4 @@ el('confirm-apply').onclick = () => {
     } catch (e) { clearPreview(); await refresh(); throw e; }
   });
 };
-void task(async () => { await refresh(); if (!local?.addresses.length) message('未检测到 Tailscale IPv4。可以先浏览本机配置；连接 Tailscale 后刷新，或手动填写本机 Tailscale IPv4。'); });
+void task(async () => { await refresh(); if (!local?.addresses.length) message('未检测到 Tailscale IPv4。可以先浏览本机 Skills 与 MCP；连接 Tailscale 后刷新，或手动填写本机 Tailscale IPv4。'); });

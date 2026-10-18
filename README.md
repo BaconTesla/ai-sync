@@ -6,7 +6,8 @@
 
 ## 已实现
 
-- 本机 Skills / MCP 清单：按 Agent、Skills、MCP 筛选与搜索。
+- 本机 Skills / MCP 清单：一个 Skill 一项，按 Agent、Skills、MCP 筛选与搜索。
+- 点击 Skill 展示可折叠的文件树，默认预览 `SKILL.md`，点击子文件预览内容。搜索子文件名仍返回整个 Skill，不拆成独立文件条目。
 - Skill 文本预览；JSON / JSONC / Codex TOML 中只提取顶层 MCP 服务定义供展示与共享，不传输完整配置。仅展示声明，不执行或探测服务。
 - MCP 按服务名称合并：新增服务加入，同名服务经确认后整条替换，本机独有服务保留。模型、权限、历史等其他设置值保持不变。
 - 手动开启只读共享，绑定指定的 Tailscale IPv4，随机 256-bit 配对令牌。
@@ -40,11 +41,11 @@ GUI 冒烟测试使用独立临时 HOME 和应用数据目录，不读写你的 
 2. 在 **源设备** 的“共享本机”中选择 / 填写本机 Tailscale IPv4，点击“开启共享”。默认端口 `47191`。
 3. 显示本机令牌并安全复制给 **目标设备**。令牌授予读取所有通过过滤的 Skills 与 MCP 定义的权限，不授予读取完整 Agent 设置的接口，不要发到公开聊天或提交到 Git。
 4. 在目标设备填入源设备的 IP、端口和令牌，点击“连接并预览”。
-5. 查看本机 / 对端共享内容，勾选需要的条目，点击“拉取所选”。Skill 按相同相对路径写入；MCP 只合并到对应文件的 MCP 字段。当前以一个来源文件中的 MCP 服务组为选择单位，不支持单独勾选组内某个服务。
+5. 点击 Skill 名称查看文件树和各文件的本机 / 对端内容，勾选整个 Skill 后点击“拉取所选”。它所有新增或有差异的可共享文件会一起列入写入清单，相同文件不重写，本机独有文件不删除。安全过滤仍生效，树中只展示通过过滤的文件，其他文件见排除提示。MCP 只合并对应文件的 MCP 字段；当前以一个来源文件中的 MCP 服务组为选择单位，不支持单独勾选组内某个服务。
 6. 用完在源设备停止共享，或直接关闭窗口。重置令牌会同时关闭共享，旧令牌失效。
 7. 反方向同步时交换源设备和目标设备即可。
 
-**Skills 按文件同步；MCP 只合并服务定义，绝不接受其他设置字段。** 同名 MCP 服务会按对端定义整条替换，不合并服务内部字段；本机独有服务不会删除。当前不判断哪一份更新，差异条目必须手动勾选并确认。
+**Skills 在界面中按整个 Skill 选择，底层逐文件写入；MCP 只合并服务定义，绝不接受其他设置字段。** 同名 MCP 服务会按对端定义整条替换，不合并服务内部字段；本机独有服务不会删除。当前不判断哪一份更新，差异条目必须手动勾选并确认。
 
 MCP 写入时会重新序列化配置文件，**格式会调整，注释可能移除**，但其他设置值保留，写入前备份完整原文件。无法安全解析或合并时拒绝写入，不回退到整文件复制。Codex TOML 中日期 / 时间值的无损写入暂不支持，遇到此类本机文件会拒绝合并。
 
@@ -67,6 +68,15 @@ MCP 写入时会重新序列化配置文件，**格式会调整，注释可能�
 不扫描整个 HOME，不读取项目级配置，不同步 `.env`、`auth.json`、认证目录、隐藏 Skill 文件或 `node_modules`，不跟随符号链接。单文件上限 256 KiB，文本总量 4 MiB，最多 500 个文件。MCP 定义可包含设备相关绝对路径，拉取后可能需要手动调整。
 
 JSON / JSONC 只选择顶层 `mcpServers`（Claude / Gemini）或 `mcp`（OpenCode），Codex TOML 只选择顶层 `mcp_servers`。`.claude.json` 的项目列表及其嵌套 MCP 不会共享。没有顶层 MCP 定义的设置文件不出现在同步清单中；解析失败的文件只报告通用错误，不将原文或解析器的敏感片段发给对端。不保证支持每个工具的全部配置版本。
+
+### Skill 的识别与展示
+
+- 以 `SKILL.md`（文件名大小写不敏感）所在目录识别一个 Skill，子目录有自己的 `SKILL.md` 时独立分组，不并入父 Skill。
+- 名称优先使用 `SKILL.md` frontmatter 中简单单行的 `name`，其次使用该文件的一级标题，最后回退到目录名。此处不是完整 YAML 解析器；复杂 YAML 名称使用回退规则。
+- 脚本、参考文档、模板等归属于对应 Skill，只在点击后的文件树中展开。同名 Skill 在不同 Agent / 路径中仍独立显示。
+- 没有可共享 `SKILL.md` 的散落文件不当作独立 Skill，也不共享。若入口文件被安全过滤，其附属文件也会被排除。
+- 顶部条目数量、勾选数量按 Skill / MCP 服务组计算；确认对话框会另外列出实际要写入的文件数。
+- “勾选整个 Skill”不是跨文件原子事务，仍受大小、类型、凭据过滤限制，也不保证被过滤掉的依赖文件能够使用。请先查看排除提示。
 
 ### 备份与恢复
 
@@ -96,19 +106,21 @@ macOS 开发版应用数据目录通常为 `~/Library/Application Support/ai-syn
 - `feature/safe-sync-core`：同步核心与测试。
 - `feature/desktop-gui`：GUI，基于核心功能的 stacked branch。
 - `feature/skills-mcp-only`：严格限定 Skills / MCP 的范围与合并逻辑，基于 GUI 分支。
+- `feature/skill-library-tree`：Skill 名称分组、文件树和整个 Skill 勾选，基于范围限制分支。
 
 远程仓库：[BaconTesla/ai-sync](https://github.com/BaconTesla/ai-sync)。原始 MVP 通过以下 PR 审查：
 
 1. [PR #1：同步核心](https://github.com/BaconTesla/ai-sync/pull/1)，`feature/safe-sync-core` → `develop`。
 2. [PR #2：桌面 GUI](https://github.com/BaconTesla/ai-sync/pull/2)，`feature/desktop-gui` → `feature/safe-sync-core`（stacked PR）。
 3. [PR #3：仅同步 Skills 与 MCP](https://github.com/BaconTesla/ai-sync/pull/3)，`feature/skills-mcp-only` → `feature/desktop-gui`。
+4. [PR #4：Skill 名称分组与文件树](https://github.com/BaconTesla/ai-sync/pull/4)，`feature/skill-library-tree` → `feature/skills-mcp-only`。
 
-请先把范围限制 PR #3 合入 GUI 分支，避免将旧版整文件同步作为符合新需求的版本使用。核心 PR #1 合并后，把更新后的 GUI PR #2 的 base 改为 `develop`；若采用 squash merge，需要先 rebase 清理已合并的核心提交。功能验收完成后，再创建 `develop` → `main` 的发布 PR。
+可先把文件树 PR #4 合入范围限制分支，再把更新后的 PR #3 合入 GUI 分支，避免将旧版整文件同步作为符合新需求的版本使用。核心 PR #1 合并后，把更新后的 GUI PR #2 的 base 改为 `develop`；若采用 squash merge，需要先 rebase 清理已合并的核心提交。功能验收完成后，再创建 `develop` → `main` 的发布 PR。
 
-**旧 GUI 分支仍包含整文件同步行为，不满足仅 Skills / MCP 的范围限制。** 请使用范围限制分支，两台设备均需切换：
+**旧 GUI 分支仍包含整文件同步行为，不满足仅 Skills / MCP 的范围限制。** 最新 Skill 文件树版本位于 `feature/skill-library-tree`，已包含范围限制；两台设备建议均切换到此分支：
 
 ```sh
-git clone --branch feature/skills-mcp-only https://github.com/BaconTesla/ai-sync.git
+git clone --branch feature/skill-library-tree https://github.com/BaconTesla/ai-sync.git
 cd ai-sync
 npm ci
 npm start
