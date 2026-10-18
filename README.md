@@ -113,8 +113,9 @@ macOS 开发版应用数据目录通常为 `~/Library/Application Support/ai-syn
 1. [PR #1：同步核心](https://github.com/BaconTesla/ai-sync/pull/1)，`feature/safe-sync-core` → `develop`。
 2. [PR #2：桌面 GUI](https://github.com/BaconTesla/ai-sync/pull/2)，`feature/desktop-gui` → `feature/safe-sync-core`（stacked PR）。
 3. [PR #3：仅同步 Skills 与 MCP](https://github.com/BaconTesla/ai-sync/pull/3)，`feature/skills-mcp-only` → `feature/desktop-gui`。
+4. [PR #4：Skill 名称分组与文件树](https://github.com/BaconTesla/ai-sync/pull/4)，`feature/skill-library-tree` → `feature/skills-mcp-only`。
 
-请先把范围限制 PR #3 合入 GUI 分支，避免将旧版整文件同步作为符合新需求的版本使用。核心 PR #1 合并后，把更新后的 GUI PR #2 的 base 改为 `develop`；若采用 squash merge，需要先 rebase 清理已合并的核心提交。功能验收完成后，再创建 `develop` → `main` 的发布 PR。
+可先把文件树 PR #4 合入范围限制分支，再把更新后的 PR #3 合入 GUI 分支，避免将旧版整文件同步作为符合新需求的版本使用。核心 PR #1 合并后，把更新后的 GUI PR #2 的 base 改为 `develop`；若采用 squash merge，需要先 rebase 清理已合并的核心提交。功能验收完成后，再创建 `develop` → `main` 的发布 PR。
 
 **旧 GUI 分支仍包含整文件同步行为，不满足仅 Skills / MCP 的范围限制。** 最新 Skill 文件树版本位于 `feature/skill-library-tree`，已包含范围限制；两台设备建议均切换到此分支：
 
