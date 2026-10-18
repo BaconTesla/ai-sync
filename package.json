@@ -1,0 +1,24 @@
+{
+  "name": "ai-sync",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Tailscale Skills and MCP definition sync desktop app",
+  "main": "dist/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
+    "start": "npm run build && electron .",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test:smoke": "npm run build && electron . --smoke-test",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "electron": "^44.9.0",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "json5": "^2.2.3",
+    "smol-toml": "^1.9.1"
+  }
+}
