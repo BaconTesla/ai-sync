@@ -3,6 +3,7 @@ import { link, lstat, mkdir, open, readdir, rename, unlink, writeFile } from 'no
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { extractMcp, mergeMcp, validateMcpFragment } from './mcp';
+import { skillDirectories, skillOwner } from '../library';
 
 export const MAX_FILE = 256 * 1024;
 export const MAX_TOTAL = 4 * 1024 * 1024;
@@ -121,6 +122,12 @@ export async function scan(home: string): Promise<ScanResult> {
     for (const config of root.configs) await collect(config);
     await walk(root.skill, 0);
   }
+  const directories = skillDirectories(result.files.filter(f => f.kind === 'Skill').map(f => f.path));
+  result.files = result.files.filter(file => {
+    if (file.kind === 'MCP' || skillOwner(file.path, directories)) return true;
+    result.skipped.push(`${file.path}：未找到可共享的 SKILL.md，不作为独立 Skill 共享`);
+    return false;
+  });
   result.files.sort((a, b) => a.path.localeCompare(b.path));
   return result;
 }
