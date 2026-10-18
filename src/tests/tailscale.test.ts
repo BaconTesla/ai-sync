@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { networkInterfaces } from 'node:os';
-import { detectTailnetAddresses, parseTailscaleIPv4Output, tailnetFromInterfaces, tailscaleIPv4 } from '../core/tailscale';
+import { detectTailnetAddresses, listTailnetPeers, parseTailscaleIPv4Output, parseTailscaleStatus, tailnetFromInterfaces, tailscaleIPv4 } from '../core/tailscale';
 
 type Interfaces = ReturnType<typeof networkInterfaces>;
 type Entry = { address: string; netmask: string; family: string; internal: boolean; cidr: string | null };
@@ -48,4 +48,38 @@ test('CLI answer is authoritative, interfaces are only the fallback', async () =
   assert.deepEqual(await detectTailnetAddresses(async () => null, () => ['100.72.31.44', '100.72.31.44']), ['100.72.31.44']);
   assert.deepEqual(await detectTailnetAddresses(async () => { throw new Error('spawn failed'); }, () => ['100.101.5.6']), ['100.101.5.6']);
   assert.deepEqual(await detectTailnetAddresses(async () => 'not-an-ip', () => []), []);
+});
+
+const statusFixture = JSON.stringify({
+  BackendState: 'Running',
+  Self: { HostName: 'this-device', DNSName: 'this-device.tail0000.ts.net.', TailscaleIPs: ['100.101.5.6', 'fd7a:115c:a1e0::1:2'] },
+  Peer: {
+    'nodekey:online': { HostName: 'bbb-mac', DNSName: 'bbb-mac.tail0000.ts.net.', TailscaleIPs: ['fd7a:115c:a1e0::2:3', '100.72.31.44'], OS: 'macOS', Online: true },
+    'nodekey:offline': { HostName: '', DNSName: 'aaa-nas.tail0000.ts.net.', TailscaleIPs: ['100.88.9.10'], OS: 'linux', Online: false },
+    'nodekey:lan': { HostName: 'lan-only', DNSName: 'lan-only.tail0000.ts.net.', TailscaleIPs: ['192.168.1.50'], OS: 'windows', Online: true },
+    'nodekey:v6': { HostName: 'ipv6-only', DNSName: 'ipv6-only.tail0000.ts.net.', TailscaleIPs: ['fd7a:115c:a1e0::6:7'], OS: 'linux', Online: true },
+    'nodekey:broken': null,
+  },
+});
+
+test('tailscale status peers are reduced to name, tailnet IPv4 and online state', () => {
+  assert.deepEqual(parseTailscaleStatus(statusFixture), [
+    { name: 'bbb-mac', dnsName: 'bbb-mac.tail0000.ts.net', ipv4: '100.72.31.44', os: 'macOS', online: true },
+    { name: 'aaa-nas', dnsName: 'aaa-nas.tail0000.ts.net', ipv4: '100.88.9.10', os: 'linux', online: false },
+  ]);
+});
+test('peers without a tailnet IPv4 are skipped and unparsable status yields an empty list', () => {
+  const onlyLan = JSON.stringify({ Peer: { 'nodekey:lan': { HostName: 'lan-only', TailscaleIPs: ['192.168.1.50'], Online: true } } });
+  assert.deepEqual(parseTailscaleStatus(onlyLan), []);
+  for (const output of ['', 'not json', '[]', '{"Peer":[]}', '{"Peer":"x"}', 'null']) assert.deepEqual(parseTailscaleStatus(output), []);
+});
+test('peers are sorted by online state then name and deduplicated by address', () => {
+  const peers = JSON.parse(JSON.stringify(JSON.parse(statusFixture))) as { Peer: Record<string, unknown> };
+  peers.Peer['nodekey:duplicate'] = { HostName: 'bbb-mac', TailscaleIPs: ['100.72.31.44'], OS: 'macOS', Online: true };
+  peers.Peer['nodekey:offline2'] = { HostName: 'zzz-pi', TailscaleIPs: ['100.90.1.2'], OS: 'linux', Online: false };
+  assert.deepEqual(parseTailscaleStatus(JSON.stringify(peers)).map(peer => peer.name), ['bbb-mac', 'aaa-nas', 'zzz-pi']);
+});
+test('peer discovery degrades to an empty list when the CLI is absent or broken', async () => {
+  assert.deepEqual(await listTailnetPeers(200, ['/nonexistent/tailscale-test-binary']), []);
+  assert.deepEqual(await listTailnetPeers(200, ['/bin/false']), []);
 });

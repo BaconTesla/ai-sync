@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import type { Server } from 'node:http';
 import { scan } from './core/files';
 import { fetchSnapshot, startPeer, validateToken } from './core/peer';
-import { detectTailnetAddresses } from './core/tailscale';
+import { detectTailnetAddresses, listTailnetPeers } from './core/tailscale';
 import { SyncEngine } from './core/sync';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -52,6 +52,7 @@ function handle<K extends keyof SyncAPI>(channel: K, callback: SyncAPI[K]): void
 }
 function registerHandlers(): void {
   handle('state', async () => ({ device: hostname(), addresses: await refreshAddresses(), sharing: Boolean(server), bind, port, token, inventory: await scan(home), backupDirectory: backups }));
+  handle('peers', async () => listTailnetPeers());
   handle('share', async input => {
     if (changingShare) throw new Error('共享状态正在变化，请稍后');
     if (!input || typeof input.enabled !== 'boolean') throw new Error('共享参数无效');
@@ -133,6 +134,19 @@ async function runSmoke(): Promise<void> {
     return 'grouped Skill names, nested file tree, file preview, folder expansion, filters and context isolation passed';
   })()`);
   console.log(`Electron smoke: ${result}`);
+  const peerPicker = await window.webContents.executeJavaScript(`(async () => {
+    const select = document.querySelector('#peer-select');
+    if (!select) return 'missing';
+    const peers = await window.sync.peers();
+    for (let i = 0; i < 50 && select.options.length !== peers.length + 1; i += 1) await new Promise(r => setTimeout(r, 100));
+    if (select.options.length !== peers.length + 1) return 'options-mismatch';
+    if (!peers.length) return 'ready without peers';
+    select.value = peers[0].ipv4;
+    select.dispatchEvent(new Event('change'));
+    return document.querySelector('#peer-host').value === peers[0].ipv4 ? 'selection fills host' : 'selection broken';
+  })()`);
+  console.log(`Electron smoke: peer picker ${peerPicker}`);
+  if (String(peerPicker).startsWith('missing') || String(peerPicker).includes('mismatch') || String(peerPicker).includes('broken')) throw new Error(`Peer picker: ${peerPicker}`);
   const host = addresses[0];
   if (host) {
     const peerHome = path.join(smokeRoot, 'peer');

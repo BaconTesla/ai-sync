@@ -26,7 +26,15 @@ interface LocalState {
   inventory: ScanResult;
   backupDirectory: string;
 }
+interface TailnetPeer {
+  name: string;
+  dnsName: string;
+  ipv4: string;
+  os: string;
+  online: boolean;
+}
 interface SyncAPI {
+  peers(): Promise<TailnetPeer[]>;
   state(): Promise<LocalState>;
   share(input: { enabled: boolean; host: string; port: number }): Promise<void>;
   rotateToken(): Promise<void>;
