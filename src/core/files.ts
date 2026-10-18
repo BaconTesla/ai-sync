@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, open, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -124,6 +124,8 @@ export async function writeSynced(home: string, backups: string, relative: strin
     await writeFile(temporary, content, { flag: 'wx', mode: 0o600 });
     const latest = await readLocal(home, relative);
     if ((latest === null ? null : hash(latest)) !== expected) throw new Error(`${relative} 写入前发生变化，请重新预览`);
-    await rename(temporary, target);
+    // A new file must never replace one created concurrently after preview.
+    if (expected === null) await link(temporary, target);
+    else await rename(temporary, target);
   } finally { await unlink(temporary).catch(() => {}); }
 }
