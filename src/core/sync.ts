@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { assertSafeContent, describe, hash, MAX_FILES, MAX_TOTAL, readLocal, writeSynced } from './files';
+import { assertSafeContent, describe, hash, MAX_FILES, MAX_TOTAL, readDocument, projectLocal, writeSynced } from './files';
+import { containsMcp, validateMcpFragment } from './mcp';
 
 type StoredRow = PlanRow & { expected: string | null };
 export class SyncEngine {
@@ -13,7 +14,7 @@ export class SyncEngine {
     this.plan = undefined;
     if (!snapshot || typeof snapshot !== 'object') throw new Error('快照无效');
     const data = snapshot as Record<string, unknown>;
-    if (data.version !== 1 || !Array.isArray(data.files) || data.files.length > MAX_FILES) throw new Error('快照版本或文件数量无效');
+    if (data.version !== 2 || !Array.isArray(data.files) || data.files.length > MAX_FILES) throw new Error('快照版本或文件数量无效');
     const rows: StoredRow[] = [];
     const seen = new Set<string>();
     const skipped: string[] = [];
@@ -24,13 +25,16 @@ export class SyncEngine {
       if (typeof file.path !== 'string' || typeof file.content !== 'string' || typeof file.hash !== 'string') throw new Error('文件字段无效');
       const info = describe(file.path);
       assertSafeContent(file.content);
+      if (info.kind === 'MCP') validateMcpFragment(file.path, file.content);
       if (seen.has(file.path) || hash(file.content) !== file.hash) throw new Error('文件重复或校验失败');
       seen.add(file.path);
       size += Buffer.byteLength(file.content);
       if (size > MAX_TOTAL) throw new Error('快照总量过大');
       try {
-        const local = await readLocal(this.home, file.path);
-        rows.push({ path: file.path, ...info, status: local === null ? '新增' : hash(local) === file.hash ? '相同' : '不同', local: local ?? '', remote: file.content, expected: local === null ? null : hash(local) });
+        const raw = await readDocument(this.home, file.path);
+        const local = projectLocal(file.path, raw);
+        const same = info.kind === 'MCP' ? containsMcp(file.path, local, file.content) : local !== null && hash(local) === file.hash;
+        rows.push({ path: file.path, ...info, status: same ? '相同' : local === null ? '新增' : '不同', local: local ?? '', remote: file.content, expected: raw === null ? null : hash(raw) });
       } catch (e) { skipped.push(`${file.path}：${(e as Error).message}`); }
     }
     if (Array.isArray(data.skipped)) skipped.push(...data.skipped.filter((s): s is string => typeof s === 'string').slice(0, 1000).map(s => `对端：${s.slice(0, 500)}`));
@@ -56,7 +60,7 @@ export class SyncEngine {
     try {
       // Validate the entire selection before the first write.
       for (const row of selected) {
-        const current = await readLocal(this.home, row.path);
+        const current = await readDocument(this.home, row.path);
         if ((current === null ? null : hash(current)) !== row.expected) throw new Error(`${row.path} 已变化，请重新预览`);
       }
       for (const row of selected) {
