@@ -89,16 +89,20 @@ macOS 开发版应用数据目录通常为 `~/Library/Application Support/ai-syn
 - `feature/safe-sync-core`：同步核心与测试。
 - `feature/desktop-gui`：GUI，基于核心功能的 stacked branch。
 
-当前目录最初无 Git / remote，已创建本地分支与提交。**没有远程仓库地址，也未安装 `gh`，因此尚未 push 或创建 PR**。提供仓库地址后：
+远程仓库：[BaconTesla/ai-sync](https://github.com/BaconTesla/ai-sync)。四个分支已推送，功能通过以下 PR 审查，尚未合并：
+
+1. [PR #1：同步核心](https://github.com/BaconTesla/ai-sync/pull/1)，`feature/safe-sync-core` → `develop`。
+2. [PR #2：桌面 GUI](https://github.com/BaconTesla/ai-sync/pull/2)，`feature/desktop-gui` → `feature/safe-sync-core`（stacked PR）。
+
+核心 PR 合并后，把 GUI PR 的 base 改为 `develop`；若采用 squash merge，需要先 rebase 清理已合并的核心提交。功能验收完成后，再创建 `develop` → `main` 的发布 PR。
+
+PR 合并前，如需运行完整 MVP，请使用 GUI 分支：
 
 ```sh
-git remote add origin <你的仓库URL>
-git push -u origin main develop feature/safe-sync-core feature/desktop-gui
-# 在 GitHub 页面或已登录的 gh 中创建：
-# 1. feature/safe-sync-core -> develop
-# 2. feature/desktop-gui -> feature/safe-sync-core（stacked PR）
-# 核心 PR 合并后，把 GUI PR 的 base 改为 develop。
-# 功能验收完成后，develop -> main 发布。
+git clone --branch feature/desktop-gui https://github.com/BaconTesla/ai-sync.git
+cd ai-sync
+npm ci
+npm start
 ```
 
 CI 在 macOS 上运行类型编译和核心测试。新 package 引入前必须先通过 Context7 查询最新文档，记录见 [`docs/context7.md`](docs/context7.md)。
