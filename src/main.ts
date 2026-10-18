@@ -121,6 +121,7 @@ async function runSmoke(): Promise<void> {
     const relative = '.claude/skills/demo/SKILL.md';
     await mkdir(path.join(peerHome, '.claude/skills/demo'), { recursive: true });
     await writeFile(path.join(peerHome, relative), '# Demo Skill v2\n\nPulled over the local Tailscale interface.');
+    await writeFile(path.join(peerHome, '.claude/settings.json'), '{"model":"SMOKE_SOURCE_PRIVATE", "mcpServers":{"Demo":{"command":"demo-v2"}}}');
     const freePort = await new Promise<number>((resolve, reject) => {
       const probe = createServer();
       probe.once('error', reject);
@@ -131,11 +132,13 @@ async function runSmoke(): Promise<void> {
     try {
       await window.webContents.executeJavaScript(`document.querySelector('#peer-host').value = ${JSON.stringify(host)}; document.querySelector('#peer-port').value = ${freePort}; document.querySelector('#peer-token').value = ${JSON.stringify(remoteToken)}; document.querySelector('#preview').click();`);
       await waitForUI("document.querySelector('#inventory-title').textContent.includes('同步预览') && document.body.getAttribute('aria-busy') === 'false'");
-      const confirmation = await window.webContents.executeJavaScript("(() => { try { const check = document.querySelector('#inventory input[type=checkbox]'); if (!check) throw new Error('No checkbox: ' + document.querySelector('#inventory').textContent); check.click(); document.querySelector('#apply').click(); if (!document.querySelector('#confirm-dialog').open) throw new Error('Confirmation missing; apply=' + document.querySelector('#apply').textContent + '; disabled=' + document.querySelector('#apply').disabled); document.querySelector('#confirm-apply').click(); return 'ok'; } catch (error) { return error.message; } })()");
+      const confirmation = await window.webContents.executeJavaScript("(() => { try { document.querySelector('[data-filter=all]').click(); const checks = document.querySelectorAll('#inventory input[type=checkbox]'); if (checks.length !== 2) throw new Error('Missing Skill or MCP checkbox'); if (document.querySelector('#remote-content').textContent.includes('SMOKE_SOURCE_PRIVATE')) throw new Error('Private settings reached preview'); checks.forEach(check => check.click()); document.querySelector('#apply').click(); if (!document.querySelector('#confirm-dialog').open) throw new Error('Confirmation missing'); document.querySelector('#confirm-apply').click(); return 'ok'; } catch (error) { return error.message; } })()");
       if (confirmation !== 'ok') throw new Error(confirmation);
-      await waitForUI("document.querySelector('#message').textContent.includes('已拉取 1 个文件') && document.body.getAttribute('aria-busy') === 'false'");
+      await waitForUI("document.querySelector('#message').textContent.includes('已拉取 2 个文件') && document.body.getAttribute('aria-busy') === 'false'");
       if (!(await readFile(path.join(home, relative), 'utf8')).includes('v2')) throw new Error('GUI pull did not update file');
-      console.log('Electron smoke: GUI preview, conflict selection, confirmation, pull over local Tailscale interface passed');
+      const merged = JSON.parse(await readFile(path.join(home, '.claude/settings.json'), 'utf8'));
+      if (merged.model !== 'SMOKE_LOCAL_PRIVATE' || merged.mcpServers.Demo.command !== 'demo-v2') throw new Error('MCP merge did not preserve local settings');
+      console.log('Electron smoke: Skill pull, MCP-only preview and merge, local preference preservation over local Tailscale interface passed');
     } finally { peer.closeAllConnections(); await new Promise<void>(resolve => peer.close(() => resolve())); }
   } else console.log('Electron smoke: Tailscale interface unavailable; network GUI test skipped');
   await new Promise(resolve => setTimeout(resolve, 200));
@@ -153,7 +156,7 @@ async function waitForUI(expression: string): Promise<void> {
   throw new Error(`UI condition timed out: ${expression}`);
 }
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!smoke && !app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { window?.show(); window?.focus(); });
   void (async () => {
@@ -162,7 +165,7 @@ else {
       home = path.join(smokeRoot, 'home');
       await mkdir(path.join(home, '.claude/skills/demo'), { recursive: true });
       await writeFile(path.join(home, '.claude/skills/demo/SKILL.md'), '# Demo Skill\n\nOnly a test fixture.');
-      await writeFile(path.join(home, '.claude/settings.json'), '{"mcpServers":{"Demo":{"command":"demo"}}}');
+      await writeFile(path.join(home, '.claude/settings.json'), '{"model":"SMOKE_LOCAL_PRIVATE", "mcpServers":{"Demo":{"command":"demo"}}}');
       await mkdir(path.join(smokeRoot, 'app', 'Shared Dictionary', 'cache'), { recursive: true });
       app.setPath('userData', path.join(smokeRoot, 'app'));
       process.once('exit', () => { if (smokeRoot) rmSync(smokeRoot, { recursive: true, force: true }); });

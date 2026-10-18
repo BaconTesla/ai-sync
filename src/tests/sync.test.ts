@@ -16,12 +16,12 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   await mkdir(path.join(home, '.claude/skills/demo'), { recursive: true });
   return { root, home, file: '.claude/skills/demo/SKILL.md', backups: path.join(root, 'backups') };
 }
-function snapshot(file: string, content: string) { return { version: 1, files: [{ path: file, content, hash: hash(content) }], skipped: [] }; }
+function snapshot(file: string, content: string) { return { version: 2, files: [{ path: file, content, hash: hash(content) }], skipped: [] }; }
 
 test('whitelist rejects traversal, private paths, hidden skill files and credentials', () => {
   for (const file of ['../.ssh/id_rsa', '/tmp/test', '.claude/skills/../../auth.json', '.codex/auth.json', '.claude/skills/a/.env', '.claude/skills/a/credentials.json', '.claude/skills/a\\x', '.claude/skills/a//b']) assert.throws(() => describe(file));
   assert.equal(describe('.claude.json').agent, 'Claude Code');
-  assert.equal(describe('.codex/config.toml').kind, 'MCP / 配置');
+  assert.equal(describe('.codex/config.toml').kind, 'MCP');
 });
 test('secret heuristic blocks embedded credentials but allows environment references', () => {
   for (const value of ['{"API_KEY":"real-key"}', 'token = "abc123"', '-----BEGIN RSA PRIVATE KEY-----']) assert.throws(() => assertSafeContent(value));
@@ -31,7 +31,7 @@ test('secret heuristic blocks embedded credentials but allows environment refere
 test('scan includes skills and MCP configuration but excludes unsafe content', async t => {
   const f = await fixture(t);
   await writeFile(path.join(f.home, f.file), '# Demo');
-  await writeFile(path.join(f.home, '.claude/settings.json'), '{"mcpServers":{}}');
+  await writeFile(path.join(f.home, '.claude/settings.json'), '{"model":"private-model", "mcpServers":{"demo":{"command":"demo"}}}');
   await writeFile(path.join(f.home, '.claude/skills/demo/key.json'), '{"token":"secret-value"}');
   const result = await scan(f.home);
   assert.equal(result.files.length, 2);
@@ -69,7 +69,7 @@ test('rejects malicious, corrupt and duplicate snapshots', async t => {
   const f = await fixture(t);
   const engine = new SyncEngine(f.home, f.backups);
   await assert.rejects(engine.preview(snapshot('../../x', 'bad')));
-  await assert.rejects(engine.preview({ version: 1, files: [{ path: f.file, content: 'x', hash: 'bad' }] }));
+  await assert.rejects(engine.preview({ version: 2, files: [{ path: f.file, content: 'x', hash: 'bad' }] }));
   const data = snapshot(f.file, 'valid');
   data.files.push(data.files[0]!);
   await assert.rejects(engine.preview(data), /重复/);

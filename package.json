@@ -1,8 +1,8 @@
 {
   "name": "ai-sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Tailscale AI agent configuration sync desktop app",
+  "description": "Tailscale Skills and MCP definition sync desktop app",
   "main": "dist/main.js",
   "type": "commonjs",
   "scripts": {
@@ -16,5 +16,9 @@
     "@types/node": "^26.6.5",
     "electron": "^44.9.0",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "json5": "^2.2.3",
+    "smol-toml": "^1.9.1"
   }
 }

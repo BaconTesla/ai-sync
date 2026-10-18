@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { extractMcp, mergeMcp, validateMcpFragment } from './mcp';
 
 export const MAX_FILE = 256 * 1024;
 export const MAX_TOTAL = 4 * 1024 * 1024;
@@ -23,11 +24,14 @@ export function describe(relative: string): { agent: string; kind: SyncFile['kin
   if (!root || /(^|\/)(\.|node_modules(?:\/|$)|\.git(?:\/|$))/.test(relative.replace(/^\.(claude|codex|gemini|agents|config)\//, '').replace(/^\.claude\.json$/, 'claude.json')) || /(?:^|\/)(?:auth|credentials|secrets?)(?:\.|\/|$)/i.test(relative)) {
     throw new Error('文件不在同步白名单中');
   }
-  return { agent: root.agent, kind: relative.startsWith(`${root.skill}/`) ? 'Skill' : 'MCP / 配置' };
+  return { agent: root.agent, kind: relative.startsWith(`${root.skill}/`) ? 'Skill' : 'MCP' };
 }
 
-export function assertSafeContent(content: string): void {
+function assertText(content: string): void {
   if (Buffer.byteLength(content) > MAX_FILE || content.includes('\0') || content.includes('\uFFFD')) throw new Error('非 UTF-8 文本或文件过大');
+}
+export function assertSafeContent(content: string): void {
+  assertText(content);
   // Conservative heuristic, not a secret scanner guarantee. Environment references are safe to transport.
   if (/-----BEGIN [\w ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,})/.test(content)) throw new Error('疑似密钥，已排除');
   for (const match of content.matchAll(/["']?(?:[\w-]*(?:token|secret|password|api[_-]?key|authorization)[\w-]*)["']?\s*[:=]\s*["']([^"'\r\n]+)["']/gi)) {
@@ -54,7 +58,8 @@ export async function safePath(home: string, relative: string, createParents = f
   return current;
 }
 
-export async function readLocal(home: string, relative: string): Promise<string | null> {
+// Raw documents stay in the main process for extraction, revision checks and local backups; never expose them in snapshots.
+export async function readDocument(home: string, relative: string): Promise<string | null> {
   const target = await safePath(home, relative);
   let handle;
   try {
@@ -64,12 +69,22 @@ export async function readLocal(home: string, relative: string): Promise<string 
     const buffer = Buffer.alloc(MAX_FILE + 1);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     const text = buffer.subarray(0, bytesRead).toString('utf8');
-    assertSafeContent(text);
+    assertText(text);
     return text;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   } finally { await handle?.close(); }
+}
+
+export function projectLocal(relative: string, raw: string | null): string | null {
+  if (raw === null) return null;
+  if (describe(relative).kind === 'MCP') return extractMcp(relative, raw);
+  assertSafeContent(raw);
+  return raw;
+}
+export async function readLocal(home: string, relative: string): Promise<string | null> {
+  return projectLocal(relative, await readDocument(home, relative));
 }
 
 export async function scan(home: string): Promise<ScanResult> {
@@ -80,6 +95,7 @@ export async function scan(home: string): Promise<ScanResult> {
       const info = describe(relative);
       const content = await readLocal(home, relative);
       if (content === null) return;
+      assertSafeContent(content);
       if (result.files.length >= MAX_FILES || size + Buffer.byteLength(content) > MAX_TOTAL) throw new Error('达到扫描总量上限');
       result.files.push({ path: relative, ...info, hash: hash(content), content });
       size += Buffer.byteLength(content);
@@ -111,8 +127,12 @@ export async function scan(home: string): Promise<ScanResult> {
 
 export async function writeSynced(home: string, backups: string, relative: string, content: string, expected: string | null): Promise<void> {
   assertSafeContent(content);
-  const current = await readLocal(home, relative);
+  const mcp = describe(relative).kind === 'MCP';
+  if (mcp) validateMcpFragment(relative, content);
+  const current = await readDocument(home, relative);
   if ((current === null ? null : hash(current)) !== expected) throw new Error(`${relative} 已变化，请重新预览`);
+  const next = mcp ? mergeMcp(relative, current, content) : content;
+  assertText(next);
   const target = await safePath(home, relative, true);
   if (current !== null) {
     const backup = path.join(backups, relative);
@@ -121,8 +141,8 @@ export async function writeSynced(home: string, backups: string, relative: strin
   }
   const temporary = `${target}.ai-sync-${randomUUID()}`;
   try {
-    await writeFile(temporary, content, { flag: 'wx', mode: 0o600 });
-    const latest = await readLocal(home, relative);
+    await writeFile(temporary, next, { flag: 'wx', mode: 0o600 });
+    const latest = await readDocument(home, relative);
     if ((latest === null ? null : hash(latest)) !== expected) throw new Error(`${relative} 写入前发生变化，请重新预览`);
     // A new file must never replace one created concurrently after preview.
     if (expected === null) await link(temporary, target);

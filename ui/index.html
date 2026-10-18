@@ -12,14 +12,14 @@
   <aside class="sidebar">
     <div class="brand"><span class="brand-icon">⇄</span><div>AI Sync<small>YOUR AGENTS, EVERYWHERE</small></div></div>
     <div class="nav-label">工作空间</div>
-    <div class="nav-item active"><span>◫</span> 配置与同步 <span class="tag">MVP</span></div>
+    <div class="nav-item active"><span>◫</span> Skills 与 MCP <span class="tag">MVP</span></div>
     <div class="sidebar-note"><span class="green-dot"></span> 私有网络 · 点对点<p>文件只在你的设备间传输。<br>不经过第三方同步服务器。</p></div>
     <div class="sidebar-bottom"><div class="avatar">⌘</div><div id="device">本机设备<small>macOS · 本地工作空间</small></div></div>
   </aside>
   <main>
-    <header><div class="eyebrow">WORKSPACE / OVERVIEW</div><div class="title-row"><div><h1>让配置，随你而行<span>↗</span></h1><p>连接你的设备，安全同步 AI Agent 的工作方式。</p></div><button id="refresh" class="secondary">↻ 刷新本机</button></div></header>
+    <header><div class="eyebrow">WORKSPACE / OVERVIEW</div><div class="title-row"><div><h1>让配置，随你而行<span>↗</span></h1><p>只同步 Skills 与 MCP，其他设置留在各自设备。</p></div><button id="refresh" class="secondary">↻ 刷新本机</button></div></header>
     <section class="stats" aria-label="本机统计">
-      <div class="stat"><span>配置文件</span><strong id="file-count">—</strong><small>白名单内的可同步文本</small></div>
+      <div class="stat"><span>同步条目</span><strong id="file-count">—</strong><small>仅 Skills 与 MCP 定义</small></div>
       <div class="stat"><span>Skills</span><strong id="skill-count">—</strong><small>基于 SKILL.md 识别</small></div>
       <div class="stat"><span>MCP 服务</span><strong id="mcp-count">—</strong><small>声明数量，不代表运行状态</small></div>
       <div class="stat"><span>共享状态</span><strong id="share-status" class="status-text">已关闭</strong><small id="address-label">等待 Tailscale 网络</small></div>
@@ -28,15 +28,15 @@
       <div class="panel"><div class="panel-heading"><h2><span class="step">01</span> 共享本机</h2><span class="muted">对端仅可读取</span></div><div class="field-row"><label class="grow">本机 Tailscale IPv4<input id="bind" placeholder="100.x.x.x" autocomplete="off"></label><label class="port">端口<input id="listen-port" type="number" min="1024" max="65535" value="47191"></label></div><label>本机配对令牌 <span class="muted">仅交给你信任的设备</span><div class="input-actions"><input id="local-token" type="password" readonly autocomplete="off"><button id="reveal" class="text-button" aria-label="显示或隐藏令牌">显示</button></div></label><div class="button-row"><button id="share" class="secondary">开启共享</button><button id="rotate" class="text-button">重置令牌</button><span class="hint">关闭窗口即停止共享</span></div></div>
       <div class="panel"><div class="panel-heading"><h2><span class="step">02</span> 从另一台设备拉取</h2><span class="muted">先预览 · 后写入</span></div><div class="field-row"><label class="grow">对端 Tailscale IPv4<input id="peer-host" placeholder="100.x.x.x" autocomplete="off"></label><label class="port">端口<input id="peer-port" type="number" min="1024" max="65535" value="47191"></label></div><label>对端配对令牌<input id="peer-token" type="password" placeholder="粘贴另一台设备的 64 位令牌" autocomplete="off"></label><div class="button-row"><button id="preview" class="primary">连接并预览 <span>→</span></button><span class="hint">需要两台设备均已连接 Tailscale</span></div></div>
     </section>
-    <div id="message" class="message" role="status" aria-live="polite">就绪。默认只查看本机文件；同步前请先备份重要配置。</div>
+    <div id="message" class="message" role="status" aria-live="polite">就绪。只同步 Skills 与 MCP；模型偏好、权限、历史等其他设置不会共享。</div>
     <section class="workspace panel">
-      <div class="workspace-heading"><div><h2 id="inventory-title">本机配置库</h2><p id="inventory-subtitle">仅显示支持的 Agent 路径，不读取认证文件。</p></div><div class="button-row"><button id="local-view" class="secondary" hidden>返回本机</button><button id="backups" class="secondary">打开备份</button><button id="apply" class="primary" disabled>拉取所选 (0)</button></div></div>
-      <div class="toolbar"><div class="filters" role="group" aria-label="文件类型"><button data-filter="all" class="selected">全部</button><button data-filter="Skill">Skills</button><button data-filter="MCP / 配置">MCP / 配置</button></div><input id="search" class="search" placeholder="搜索 Agent、路径、服务名称…" aria-label="搜索文件"><button id="select-new" class="text-button" hidden>勾选所有新增</button></div>
-      <div class="browser"><div id="inventory" class="file-list" aria-label="配置文件列表"><div class="empty">正在扫描本机配置…</div></div><div class="detail"><div class="detail-heading"><strong id="detail-name">选择一个文件</strong><span id="detail-meta" class="muted">内容预览</span></div><div id="service-info" class="service-info" hidden></div><div class="diff"><div><div class="code-label">本机内容</div><pre id="local-content">在左侧选择 Skill 或配置文件，查看内容。</pre></div><div id="remote-pane" hidden><div class="code-label">对端内容 <span class="muted">将写入本机</span></div><pre id="remote-content"></pre></div></div></div></div>
+      <div class="workspace-heading"><div><h2 id="inventory-title">本机 Skills 与 MCP</h2><p id="inventory-subtitle">只共享 Skills 和 MCP 服务定义，不共享其他设置。</p></div><div class="button-row"><button id="local-view" class="secondary" hidden>返回本机</button><button id="backups" class="secondary">打开备份</button><button id="apply" class="primary" disabled>拉取所选 (0)</button></div></div>
+      <div class="toolbar"><div class="filters" role="group" aria-label="文件类型"><button data-filter="all" class="selected">全部</button><button data-filter="Skill">Skills</button><button data-filter="MCP">MCP 服务</button></div><input id="search" class="search" placeholder="搜索 Agent、路径、服务名称…" aria-label="搜索文件"><button id="select-new" class="text-button" hidden>勾选所有新增</button></div>
+      <div class="browser"><div id="inventory" class="file-list" aria-label="Skills 与 MCP 列表"><div class="empty">正在扫描本机配置…</div></div><div class="detail"><div class="detail-heading"><strong id="detail-name">选择一个文件</strong><span id="detail-meta" class="muted">内容预览</span></div><div id="service-info" class="service-info" hidden></div><div class="diff"><div><div class="code-label">本机内容</div><pre id="local-content">在左侧选择 Skill 或 MCP，查看共享内容。</pre></div><div id="remote-pane" hidden><div class="code-label">对端内容 <span class="muted">将写入本机</span></div><pre id="remote-content"></pre></div></div></div></div>
       <details id="skipped-box"><summary id="skipped-summary">被排除的文件</summary><pre id="skipped"></pre></details>
     </section>
-    <footer><span>⇄ 手动拉取 · 不同步删除 · 不执行远程代码</span><span>AI SYNC / 0.1.0</span></footer>
+    <footer><span>⇄ 仅 Skills + MCP · 不共享其他设置 · 不执行代码</span><span>AI SYNC / 0.2.0</span></footer>
   </main>
-  <dialog id="confirm-dialog"><h2>确认拉取配置？</h2><p id="confirm-text"></p><p class="muted">已有文件会先备份。不执行 MCP 或 Skills，但你的 Agent 之后可能会加载它们，请确认来源可信。配置中的绝对路径可能需要在本机手动调整。</p><div class="button-row"><button id="cancel-apply" class="secondary">取消</button><button id="confirm-apply" class="primary">确认拉取</button></div></dialog>
+  <dialog id="confirm-dialog"><h2>确认拉取配置？</h2><p id="confirm-text"></p><p class="muted">已有文件会先备份。不执行 MCP 或 Skills，但你的 Agent 之后可能会加载它们，请确认来源可信。MCP 中的绝对路径可能需要在本机手动调整。</p><div class="button-row"><button id="cancel-apply" class="secondary">取消</button><button id="confirm-apply" class="primary">确认拉取</button></div></dialog>
 </body>
 </html>

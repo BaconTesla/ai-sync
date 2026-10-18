@@ -1,7 +1,7 @@
 interface SyncFile {
   path: string;
   agent: string;
-  kind: 'Skill' | 'MCP / 配置';
+  kind: 'Skill' | 'MCP';
   hash: string;
   content: string;
 }
