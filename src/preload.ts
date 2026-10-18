@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 const api: SyncAPI = {
   state: () => ipcRenderer.invoke('sync:state'),
+  peers: () => ipcRenderer.invoke('sync:peers'),
   share: input => ipcRenderer.invoke('sync:share', input),
   rotateToken: () => ipcRenderer.invoke('sync:rotateToken'),
   preview: peer => ipcRenderer.invoke('sync:preview', peer),

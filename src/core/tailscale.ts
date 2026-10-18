@@ -36,9 +36,9 @@ export function parseTailscaleIPv4Output(stdout: string): string | null {
 
 type Probe = { stdout: string } | { missing: true } | { failed: true };
 
-function execText(bin: string, timeout: number): Promise<Probe> {
+function execText(bin: string, args: string[], timeout: number, maxBuffer = 64 * 1024): Promise<Probe> {
   return new Promise(resolve => {
-    execFile(bin, ['ip', '-4'], { timeout, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
+    execFile(bin, args, { timeout, maxBuffer, windowsHide: true }, (error, stdout) => {
       if (!error) return resolve({ stdout });
       resolve((error as NodeJS.ErrnoException).code === 'ENOENT' ? { missing: true } : { failed: true });
     });
@@ -52,11 +52,72 @@ function execText(bin: string, timeout: number): Promise<Probe> {
  */
 export async function tailscaleIPv4(timeout = DEFAULT_TIMEOUT, binaries: string[] = TAILSCALE_BINARIES): Promise<string | null> {
   for (const bin of binaries) {
-    const result = await execText(bin, timeout);
+    const result = await execText(bin, ['ip', '-4'], timeout);
     if ('missing' in result) continue;
     return 'failed' in result ? null : parseTailscaleIPv4Output(result.stdout);
   }
   return null;
+}
+
+/** 从 CLI 读取一次命令输出的通用入口：找不到二进制返回 null，失败返回 null。 */
+async function tailscaleOutput(args: string[], timeout: number, maxBuffer: number, binaries: string[]): Promise<string | null> {
+  for (const bin of binaries) {
+    const result = await execText(bin, args, timeout, maxBuffer);
+    if ('missing' in result) continue;
+    return 'failed' in result ? null : result.stdout;
+  }
+  return null;
+}
+
+export interface TailnetPeer {
+  /** 展示名：优先 HostName，其次 MagicDNS 首段，最后 IP。 */
+  name: string;
+  /** MagicDNS 完整名称（不含结尾点），可能为空。 */
+  dnsName: string;
+  /** tailnet IPv4，100.64.0.0/10。 */
+  ipv4: string;
+  os: string;
+  online: boolean;
+}
+
+/**
+ * 解析 `tailscale status --json`。只读取展示与连接所需的字段：
+ * 对端名称、IPv4、系统、在线状态，不保留密钥、流量、relay 等信息。
+ */
+export function parseTailscaleStatus(output: string): TailnetPeer[] {
+  let status: unknown;
+  try { status = JSON.parse(output); } catch { return []; }
+  if (!status || typeof status !== 'object') return [];
+  const peers = (status as { Peer?: unknown }).Peer;
+  if (!peers || typeof peers !== 'object' || Array.isArray(peers)) return [];
+  const found: TailnetPeer[] = [];
+  for (const value of Object.values(peers as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const peer = value as Record<string, unknown>;
+    const addresses = Array.isArray(peer.TailscaleIPs) ? peer.TailscaleIPs : [];
+    const ipv4 = addresses.find(address => typeof address === 'string' && isTailnetIPv4(address)) as string | undefined;
+    if (!ipv4) continue;
+    const hostName = typeof peer.HostName === 'string' ? peer.HostName.trim() : '';
+    const dnsName = typeof peer.DNSName === 'string' ? peer.DNSName.replace(/\.$/, '') : '';
+    found.push({
+      name: hostName || dnsName.split('.')[0] || ipv4,
+      dnsName,
+      ipv4,
+      os: typeof peer.OS === 'string' ? peer.OS : '',
+      online: peer.Online === true,
+    });
+  }
+  const unique = new Map(found.map(peer => [peer.ipv4, peer]));
+  return [...unique.values()].sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name) || a.ipv4.localeCompare(b.ipv4));
+}
+
+/**
+ * 列出 tailnet 内其他设备，等价于 `tailscale status` 的 Peer 部分。
+ * 只在本地读取并展示，不发送给任何对端。
+ */
+export async function listTailnetPeers(timeout = 3000, binaries: string[] = TAILSCALE_BINARIES): Promise<TailnetPeer[]> {
+  const output = await tailscaleOutput(['status', '--json'], timeout, 8 * 1024 * 1024, binaries);
+  return output === null ? [] : parseTailscaleStatus(output);
 }
 
 type Interfaces = ReturnType<typeof networkInterfaces>;

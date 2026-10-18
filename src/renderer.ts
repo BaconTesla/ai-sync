@@ -12,6 +12,7 @@ let filter = 'all';
 let focusEntry = '';
 let focusPath = '';
 let busy = false;
+let peers: TailnetPeer[] = [];
 // Selection stays file-based at the IPC boundary; the UI adds/removes all eligible files of a Skill together.
 const selected = new Set<string>();
 
@@ -46,8 +47,41 @@ function visibleEntries(): LibraryEntry[] {
     `${entry.title} ${entry.path} ${entry.agent} ${entry.files.map(f => `${f.path} ${f.kind === 'MCP' ? mcpNames(plan ? f.remote : f.local).join(' ') : ''}`).join(' ')}`.toLowerCase().includes(query));
 }
 function selectedEntries(): LibraryEntry[] { return entries().filter(entry => entry.files.some(f => selected.has(f.path))); }
+function peerLabel(peer: TailnetPeer): string {
+  return [peer.name, peer.online ? '' : '离线', peer.ipv4, peer.os].filter(Boolean).join(' · ');
+}
+// 设备列表只用于本机选择目标，不参与同步内容；选中即把 IPv4 填进输入框，仍可手动改写。
+function renderPeers(): void {
+  const select = el<HTMLSelectElement>('peer-select');
+  const chosen = peers.find(peer => peer.ipv4 === input('peer-host').value.trim());
+  select.replaceChildren();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = peers.length ? '选择 Tailscale 设备…' : '未发现其他 Tailscale 设备，可手动填写 IP';
+  select.append(placeholder);
+  for (const peer of peers) {
+    const option = document.createElement('option');
+    option.value = peer.ipv4;
+    option.textContent = peerLabel(peer);
+    select.append(option);
+  }
+  select.value = chosen ? chosen.ipv4 : '';
+}
+async function loadPeers(): Promise<void> {
+  try { peers = await window.sync.peers(); }
+  catch { peers = []; }
+  renderPeers();
+}
+function selectPeer(select: HTMLSelectElement): void {
+  const peer = peers.find(item => item.ipv4 === select.value);
+  if (!peer) return;
+  input('peer-host').value = peer.ipv4;
+  select.value = peer.ipv4;
+  message(`${peer.name} · ${peer.ipv4}${peer.online ? '' : '，该设备当前离线'}`, !peer.online);
+}
 function updateActions(): void {
-  for (const id of ['refresh', 'share', 'rotate', 'preview', 'backups', 'local-view', 'select-new', 'confirm-apply']) el<HTMLButtonElement>(id).disabled = busy;
+  for (const id of ['refresh', 'peer-reload', 'share', 'rotate', 'preview', 'backups', 'local-view', 'select-new', 'confirm-apply']) el<HTMLButtonElement>(id).disabled = busy;
+  el<HTMLSelectElement>('peer-select').disabled = busy;
   el<HTMLButtonElement>('apply').disabled = busy || !plan || selected.size === 0;
   el('apply').textContent = `拉取所选 (${selectedEntries().length})`;
   for (const check of document.querySelectorAll<HTMLInputElement>('#inventory input[type=checkbox]')) check.disabled = busy || check.dataset.unchanged === 'true';
@@ -213,6 +247,7 @@ async function refresh(): Promise<void> {
   el('address-label').textContent = local.sharing ? `${local.bind}:${local.port}` : local.addresses.join(' · ') || '未检测到 Tailscale IPv4';
   el('share').textContent = local.sharing ? '停止共享' : '开启共享';
   renderRows();
+  await loadPeers();
 }
 el('refresh').onclick = () => void task(async () => { clearPreview(); await refresh(); message('本机 Skills 与 MCP 已刷新。'); });
 el('share').onclick = () => void task(async () => {
@@ -220,6 +255,8 @@ el('share').onclick = () => void task(async () => {
   finally { await refresh(); }
   message(local?.sharing ? '共享已开启：仅共享符合过滤规则的 Skills 和 MCP 服务定义，不发送其他设置。无需共享时请及时关闭。' : '共享已停止。');
 });
+el<HTMLSelectElement>('peer-select').onchange = event => selectPeer(event.currentTarget as HTMLSelectElement);
+el('peer-reload').onclick = () => void task(async () => { await loadPeers(); message(peers.length ? `已读取 ${peers.length} 台 Tailscale 设备。` : '未读取到其他 Tailscale 设备，可手动填写对端 IP。'); });
 el('rotate').onclick = () => void task(async () => { await window.sync.rotateToken(); await refresh(); message('令牌已重置，共享已关闭。请将新令牌安全地传给另一台设备。'); });
 el('reveal').onclick = () => { const field = input('local-token'); field.type = field.type === 'password' ? 'text' : 'password'; el('reveal').textContent = field.type === 'password' ? '显示' : '隐藏'; };
 el('preview').onclick = () => void task(async () => {
