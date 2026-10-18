@@ -2,13 +2,14 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { rmSync } from 'node:fs';
-import { hostname, homedir, networkInterfaces, tmpdir } from 'node:os';
+import { hostname, homedir, tmpdir } from 'node:os';
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Server } from 'node:http';
 import { scan } from './core/files';
-import { fetchSnapshot, isTailnetIPv4, startPeer, validateToken } from './core/peer';
+import { fetchSnapshot, startPeer, validateToken } from './core/peer';
+import { detectTailnetAddresses } from './core/tailscale';
 import { SyncEngine } from './core/sync';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -18,6 +19,8 @@ let window: BrowserWindow | undefined;
 let server: Server | undefined;
 let token = '';
 let bind = '';
+let addresses: string[] = [];
+let addressProbe: Promise<string[]> | undefined;
 let port = 47191;
 let changingShare = false;
 let engine: SyncEngine;
@@ -26,8 +29,11 @@ let tokenPath: string;
 const page = path.join(__dirname, '../ui/index.html');
 const pageURL = pathToFileURL(page).href;
 
-function addresses(): string[] {
-  return [...new Set(Object.values(networkInterfaces()).flatMap(list => list ?? []).map(n => n.address).filter(isTailnetIPv4))];
+function refreshAddresses(): Promise<string[]> {
+  addressProbe ??= detectTailnetAddresses()
+    .then(list => (addresses = list))
+    .finally(() => { addressProbe = undefined; });
+  return addressProbe;
 }
 async function stopSharing(): Promise<void> {
   const current = server;
@@ -45,7 +51,7 @@ function handle<K extends keyof SyncAPI>(channel: K, callback: SyncAPI[K]): void
   });
 }
 function registerHandlers(): void {
-  handle('state', async () => ({ device: hostname(), addresses: addresses(), sharing: Boolean(server), bind, port, token, inventory: await scan(home), backupDirectory: backups }));
+  handle('state', async () => ({ device: hostname(), addresses: await refreshAddresses(), sharing: Boolean(server), bind, port, token, inventory: await scan(home), backupDirectory: backups }));
   handle('share', async input => {
     if (changingShare) throw new Error('共享状态正在变化，请稍后');
     if (!input || typeof input.enabled !== 'boolean') throw new Error('共享参数无效');
@@ -127,7 +133,7 @@ async function runSmoke(): Promise<void> {
     return 'grouped Skill names, nested file tree, file preview, folder expansion, filters and context isolation passed';
   })()`);
   console.log(`Electron smoke: ${result}`);
-  const host = addresses()[0];
+  const host = addresses[0];
   if (host) {
     const peerHome = path.join(smokeRoot, 'peer');
     const relative = '.claude/skills/demo/SKILL.md';
@@ -224,7 +230,8 @@ else {
       token = randomBytes(32).toString('hex');
       await saveToken();
     }
-    bind = addresses()[0] ?? '';
+    await refreshAddresses();
+    bind = addresses[0] ?? '';
     engine = new SyncEngine(home, backups);
     registerHandlers();
     createWindow();
