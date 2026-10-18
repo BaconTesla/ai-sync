@@ -26,12 +26,12 @@ export async function startPeer(home: string, host: string, port: number, token:
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     if (!authorized(req.headers.authorization, token)) { res.writeHead(401).end('{"error":"Unauthorized"}'); return; }
-    if (req.method !== 'GET' || req.url !== '/v1/snapshot') { res.writeHead(404).end('{}'); return; }
+    if (req.method !== 'GET' || req.url !== '/v2/snapshot') { res.writeHead(404).end('{}'); return; }
     if (busy) { res.writeHead(429).end('{"error":"Busy"}'); return; }
     busy = true;
     try {
       const snapshot = await scan(home);
-      const body = JSON.stringify({ version: 1, ...snapshot });
+      const body = JSON.stringify({ version: 2, ...snapshot });
       if (Buffer.byteLength(body) > MAX_WIRE) throw new Error('快照过大');
       res.end(body);
     } catch { res.writeHead(500).end('{"error":"Snapshot failed"}'); }
@@ -50,7 +50,7 @@ export async function fetchSnapshot(peer: PeerInput, test = false): Promise<unkn
   validateEndpoint(peer.host, peer.port, test);
   validateToken(peer.token);
   return new Promise((resolve, reject) => {
-    const request = http.get({ hostname: peer.host, port: peer.port, path: '/v1/snapshot', headers: { Authorization: `Bearer ${peer.token}` }, agent: false }, response => {
+    const request = http.get({ hostname: peer.host, port: peer.port, path: '/v2/snapshot', headers: { Authorization: `Bearer ${peer.token}` }, agent: false }, response => {
       if (response.statusCode !== 200) {
         response.resume();
         reject(new Error(`对端返回 ${response.statusCode}，请检查配对令牌和共享状态`));

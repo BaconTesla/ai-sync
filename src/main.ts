@@ -111,16 +111,34 @@ async function runSmoke(): Promise<void> {
     document.querySelector('#inventory .file-row').click();
     if (!document.querySelector('#local-content').textContent.includes('Demo')) throw new Error('Preview did not render');
     document.querySelector('[data-filter="Skill"]').click();
-    if (document.querySelectorAll('#inventory .file-row').length !== 1) throw new Error('Filter broken');
-    return 'inventory, preview, filters, context isolation passed';
+    if (document.querySelectorAll('#inventory .file-row').length !== 1) throw new Error('A Skill was split into separate file rows');
+    if (document.querySelector('#inventory .file-name').textContent !== 'demo-skill') throw new Error('Skill name not read from manifest');
+    document.querySelector('#inventory .file-row').click();
+    if (document.querySelector('#skill-files').hidden) throw new Error('File tree missing');
+    if (document.querySelectorAll('#skill-tree [data-file-path]').length !== 3) throw new Error('Skill files missing from tree');
+    if (!document.querySelector('#local-content').textContent.includes('# Demo Skill')) throw new Error('Manifest not selected by default');
+    document.querySelector('#skill-tree [data-file-path$="scripts/run.ts"]').click();
+    if (!document.querySelector('#local-content').textContent.includes('local helper')) throw new Error('Tree file preview broken');
+    const folder = document.querySelector('#skill-tree details');
+    folder.querySelector('summary').click();
+    if (folder.open) throw new Error('Folder did not collapse');
+    folder.querySelector('summary').click();
+    if (!folder.open) throw new Error('Folder did not expand');
+    return 'grouped Skill names, nested file tree, file preview, folder expansion, filters and context isolation passed';
   })()`);
   console.log(`Electron smoke: ${result}`);
   const host = addresses()[0];
   if (host) {
     const peerHome = path.join(smokeRoot, 'peer');
     const relative = '.claude/skills/demo/SKILL.md';
-    await mkdir(path.join(peerHome, '.claude/skills/demo'), { recursive: true });
-    await writeFile(path.join(peerHome, relative), '# Demo Skill v2\n\nPulled over the local Tailscale interface.');
+    await mkdir(path.join(peerHome, '.claude/skills/demo/scripts'), { recursive: true });
+    await mkdir(path.join(peerHome, '.claude/skills/demo/assets'), { recursive: true });
+    await mkdir(path.join(peerHome, '.claude/skills/demo/references'), { recursive: true });
+    await writeFile(path.join(peerHome, relative), '---\nname: demo-skill\n---\n# Demo Skill v2\n\nPulled over the local Tailscale interface.');
+    await writeFile(path.join(peerHome, '.claude/skills/demo/scripts/run.ts'), '// remote helper v2');
+    await writeFile(path.join(peerHome, '.claude/skills/demo/assets/template.txt'), 'unchanged template');
+    await writeFile(path.join(peerHome, '.claude/skills/demo/references/example.md'), '# New reference');
+    await writeFile(path.join(peerHome, '.claude/settings.json'), '{"model":"SMOKE_SOURCE_PRIVATE", "mcpServers":{"Demo":{"command":"demo-v2"}}}');
     const freePort = await new Promise<number>((resolve, reject) => {
       const probe = createServer();
       probe.once('error', reject);
@@ -131,13 +149,39 @@ async function runSmoke(): Promise<void> {
     try {
       await window.webContents.executeJavaScript(`document.querySelector('#peer-host').value = ${JSON.stringify(host)}; document.querySelector('#peer-port').value = ${freePort}; document.querySelector('#peer-token').value = ${JSON.stringify(remoteToken)}; document.querySelector('#preview').click();`);
       await waitForUI("document.querySelector('#inventory-title').textContent.includes('同步预览') && document.body.getAttribute('aria-busy') === 'false'");
-      const confirmation = await window.webContents.executeJavaScript("(() => { try { const check = document.querySelector('#inventory input[type=checkbox]'); if (!check) throw new Error('No checkbox: ' + document.querySelector('#inventory').textContent); check.click(); document.querySelector('#apply').click(); if (!document.querySelector('#confirm-dialog').open) throw new Error('Confirmation missing; apply=' + document.querySelector('#apply').textContent + '; disabled=' + document.querySelector('#apply').disabled); document.querySelector('#confirm-apply').click(); return 'ok'; } catch (error) { return error.message; } })()");
+      const confirmation = await window.webContents.executeJavaScript(`(() => {
+        try {
+          document.querySelector('[data-filter=all]').click();
+          if (document.querySelectorAll('#inventory input[type=checkbox]').length !== 2) throw new Error('Skill checkbox was split by files');
+          const search = document.querySelector('#search');
+          search.value = 'run.ts'; search.dispatchEvent(new Event('input'));
+          if (document.querySelectorAll('#inventory .file-row').length !== 1) throw new Error('Searching child filename did not return its Skill');
+          document.querySelector('#inventory .file-row').click();
+          if (document.querySelectorAll('#skill-tree [data-file-path]').length !== 4) throw new Error('Search truncated Skill file tree');
+          document.querySelector('#inventory input[type=checkbox]').click();
+          if (!document.querySelector('#apply').textContent.includes('(1)')) throw new Error('Selection count must count Skills, not files');
+          search.value = ''; search.dispatchEvent(new Event('input'));
+          document.querySelector('#inventory [data-entry-id=".claude/settings.json"] input').click();
+          document.querySelector('#apply').click();
+          if (!document.querySelector('#confirm-dialog').open) throw new Error('Confirmation missing');
+          if (!document.querySelector('#confirm-text').textContent.includes('共写入 4 个文件')) throw new Error('Whole Skill selection omitted changed files or rewrote identical ones');
+          document.querySelector('#confirm-apply').click();
+          return 'ok';
+        } catch (error) { return error.message; }
+      })()`);
       if (confirmation !== 'ok') throw new Error(confirmation);
-      await waitForUI("document.querySelector('#message').textContent.includes('已拉取 1 个文件') && document.body.getAttribute('aria-busy') === 'false'");
+      await waitForUI("document.querySelector('#message').textContent.includes('已拉取 4 个文件') && document.body.getAttribute('aria-busy') === 'false'");
       if (!(await readFile(path.join(home, relative), 'utf8')).includes('v2')) throw new Error('GUI pull did not update file');
-      console.log('Electron smoke: GUI preview, conflict selection, confirmation, pull over local Tailscale interface passed');
+      const merged = JSON.parse(await readFile(path.join(home, '.claude/settings.json'), 'utf8'));
+      if (merged.model !== 'SMOKE_LOCAL_PRIVATE' || merged.mcpServers.Demo.command !== 'demo-v2') throw new Error('MCP merge did not preserve local settings');
+      if (!(await readFile(path.join(home, '.claude/skills/demo/scripts/run.ts'), 'utf8')).includes('remote helper v2')) throw new Error('Whole Skill omitted helper script');
+      if (!(await readFile(path.join(home, '.claude/skills/demo/references/example.md'), 'utf8')).includes('New reference')) throw new Error('Whole Skill omitted nested reference');
+      if (await readFile(path.join(home, '.claude/skills/demo/assets/template.txt'), 'utf8') !== 'unchanged template') throw new Error('Unchanged resource was modified');
+      await window.webContents.executeJavaScript("document.querySelector('[data-filter=Skill]').click(); document.querySelector('#inventory .file-row').click(); document.querySelector('#skill-tree [data-file-path$=\\\"scripts/run.ts\\\"]').click();");
+      console.log('Electron smoke: filename search, whole-Skill selection, all changed files pulled, unchanged files preserved, MCP merge and local preferences passed');
     } finally { peer.closeAllConnections(); await new Promise<void>(resolve => peer.close(() => resolve())); }
   } else console.log('Electron smoke: Tailscale interface unavailable; network GUI test skipped');
+  await window.webContents.executeJavaScript("document.querySelector('.workspace').scrollIntoView({block: 'start'});");
   await new Promise(resolve => setTimeout(resolve, 200));
   await window.webContents.capturePage().then(image => writeFile(path.join(tmpdir(), 'ai-sync-smoke.png'), image.toPNG()));
   console.log(`Screenshot: ${path.join(tmpdir(), 'ai-sync-smoke.png')}`);
@@ -153,16 +197,19 @@ async function waitForUI(expression: string): Promise<void> {
   throw new Error(`UI condition timed out: ${expression}`);
 }
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!smoke && !app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { window?.show(); window?.focus(); });
   void (async () => {
     if (smoke) {
       smokeRoot = await mkdtemp(path.join(tmpdir(), 'ai-sync-ui-'));
       home = path.join(smokeRoot, 'home');
-      await mkdir(path.join(home, '.claude/skills/demo'), { recursive: true });
-      await writeFile(path.join(home, '.claude/skills/demo/SKILL.md'), '# Demo Skill\n\nOnly a test fixture.');
-      await writeFile(path.join(home, '.claude/settings.json'), '{"mcpServers":{"Demo":{"command":"demo"}}}');
+      await mkdir(path.join(home, '.claude/skills/demo/scripts'), { recursive: true });
+      await mkdir(path.join(home, '.claude/skills/demo/assets'), { recursive: true });
+      await writeFile(path.join(home, '.claude/skills/demo/SKILL.md'), '---\nname: demo-skill\n---\n# Demo Skill\n\nOnly a test fixture.');
+      await writeFile(path.join(home, '.claude/skills/demo/scripts/run.ts'), '// local helper');
+      await writeFile(path.join(home, '.claude/skills/demo/assets/template.txt'), 'unchanged template');
+      await writeFile(path.join(home, '.claude/settings.json'), '{"model":"SMOKE_LOCAL_PRIVATE", "mcpServers":{"Demo":{"command":"demo"}}}');
       await mkdir(path.join(smokeRoot, 'app', 'Shared Dictionary', 'cache'), { recursive: true });
       app.setPath('userData', path.join(smokeRoot, 'app'));
       process.once('exit', () => { if (smokeRoot) rmSync(smokeRoot, { recursive: true, force: true }); });
