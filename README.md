@@ -2,7 +2,7 @@
 
 用 GUI 同步 Mac mini / MacBook 上的 **Skills 和 MCP 服务定义**，不共享模型偏好、权限、历史等其他设置。基于 **Electron + TypeScript**，通过 **Tailscale IPv4 + 配对令牌**直接在设备间手动拉取，不依赖云端同步服务。
 
-> 当前为可运行的开发版 MVP，不是已签名的 macOS 安装包。先用不重要的配置验证，再用于日常环境。
+> 第一版：**v0.2.1（开发预览版）**。完整功能以 `main` 为使用入口，仍不是已签名的 macOS 安装包。先用不重要的配置验证，再用于日常环境。
 
 ## 已实现
 
@@ -18,9 +18,21 @@
 
 ## 启动
 
-建议 Node.js 24 LTS，macOS，npm。
+建议 Node.js 24 LTS，macOS，npm。首次获取第一版：
 
 ```sh
+git clone --branch main https://github.com/BaconTesla/ai-sync.git
+cd ai-sync
+npm ci
+npm start
+```
+
+已有仓库时，先关闭旧版应用，在工作区没有未提交修改的情况下切换到 `main` 并更新：
+
+```sh
+git fetch origin
+git switch main
+git pull --ff-only
 npm ci
 npm start
 ```
@@ -101,32 +113,20 @@ macOS 开发版应用数据目录通常为 `~/Library/Application Support/ai-syn
 
 ## Git / PR 工作流
 
-- `main`：稳定基线。
-- `develop`：开发集成，功能经 PR 后进入。
-- `feature/safe-sync-core`：同步核心与测试。
-- `feature/desktop-gui`：GUI，基于核心功能的 stacked branch。
-- `feature/skills-mcp-only`：严格限定 Skills / MCP 的范围与合并逻辑，基于 GUI 分支。
-- `feature/skill-library-tree`：Skill 名称分组、文件树和整个 Skill 勾选，基于范围限制分支。
+- `main`：第一版及后续发布的使用入口，不再需要切换到具体功能分支。
+- `develop`：后续开发集成分支。
+- `feature/*`：后续单个功能从 `develop` 建分支，完成后 push 并创建面向 `develop` 的 PR；验收后再通过发布 PR 集成到 `main`。
 
-远程仓库：[BaconTesla/ai-sync](https://github.com/BaconTesla/ai-sync)。原始 MVP 通过以下 PR 审查：
+远程仓库：[BaconTesla/ai-sync](https://github.com/BaconTesla/ai-sync)。第一版的四个功能 PR 已合并并完整集成到 `develop`：
 
-1. [PR #1：同步核心](https://github.com/BaconTesla/ai-sync/pull/1)，`feature/safe-sync-core` → `develop`。
-2. [PR #2：桌面 GUI](https://github.com/BaconTesla/ai-sync/pull/2)，`feature/desktop-gui` → `feature/safe-sync-core`（stacked PR）。
-3. [PR #3：仅同步 Skills 与 MCP](https://github.com/BaconTesla/ai-sync/pull/3)，`feature/skills-mcp-only` → `feature/desktop-gui`。
-4. [PR #4：Skill 名称分组与文件树](https://github.com/BaconTesla/ai-sync/pull/4)，`feature/skill-library-tree` → `feature/skills-mcp-only`。
+1. [PR #1：同步核心](https://github.com/BaconTesla/ai-sync/pull/1)。
+2. [PR #2：桌面 GUI](https://github.com/BaconTesla/ai-sync/pull/2)，合并前已将目标分支改为 `develop`。
+3. [PR #3：仅同步 Skills 与 MCP](https://github.com/BaconTesla/ai-sync/pull/3)。
+4. [PR #4：Skill 名称分组与文件树](https://github.com/BaconTesla/ai-sync/pull/4)。
 
-可先把文件树 PR #4 合入范围限制分支，再把更新后的 PR #3 合入 GUI 分支，避免将旧版整文件同步作为符合新需求的版本使用。核心 PR #1 合并后，把更新后的 GUI PR #2 的 base 改为 `develop`；若采用 squash merge，需要先 rebase 清理已合并的核心提交。功能验收完成后，再创建 `develop` → `main` 的发布 PR。
+文件树先合入范围限制分支，再合入 GUI；完整 GUI 最后进入 `develop`。功能分支保留作开发历史，日常使用请以 `main` 为准。第一版说明见 [`docs/releases/v0.2.1.md`](docs/releases/v0.2.1.md)。
 
-**旧 GUI 分支仍包含整文件同步行为，不满足仅 Skills / MCP 的范围限制。** 最新 Skill 文件树版本位于 `feature/skill-library-tree`，已包含范围限制；两台设备建议均切换到此分支：
-
-```sh
-git clone --branch feature/skill-library-tree https://github.com/BaconTesla/ai-sync.git
-cd ai-sync
-npm ci
-npm start
-```
-
-CI 在 macOS 上运行类型编译和核心测试。新 package 引入前必须先通过 Context7 查询最新文档，记录见 [`docs/context7.md`](docs/context7.md)。
+仓库已配置 macOS CI 工作流。第一版合并前本地类型检查、32 项测试和 GUI 冒烟测试通过；GitHub 当时未返回 CI 检查记录，不将其视为远程 CI 通过。新 package 引入前必须先通过 Context7 查询最新文档，记录见 [`docs/context7.md`](docs/context7.md)。
 
 ## 后续计划
 
